@@ -69,7 +69,3 @@ def handle_disconnect():
 
 def broadcast_system_message(msg, namespace='/'):
     socketio.emit('system', {'msg': msg}, namespace=namespace)
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
