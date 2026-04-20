@@ -1,11 +1,15 @@
 from flask import Flask
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, request
 from datetime import datetime
 import os
 
+# Принудительно используем eventlet
+import eventlet
+eventlet.monkey_patch()
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 users = {}
 messages = []
@@ -27,7 +31,6 @@ def handle_set_nick(data):
         return
     users[request.sid] = nick
     emit('nick_success', {'nick': nick})
-    # Не спамим системой о подключении, чтобы не бесило
 
 @socketio.on('send_message')
 def handle_message(data):
