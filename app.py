@@ -1,15 +1,11 @@
-from flask import Flask
-from flask_socketio import SocketIO, emit, request
+from flask import Flask, request
+from flask_socketio import SocketIO, emit
 from datetime import datetime
 import os
 
-# Принудительно используем eventlet
-import eventlet
-eventlet.monkey_patch()
-
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 users = {}
 messages = []
@@ -59,4 +55,4 @@ def handle_disconnect():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port)
+    socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
