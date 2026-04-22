@@ -108,7 +108,7 @@
             background: #1e2f3b;
             color: #eef2f5;
             word-wrap: break-word;
-            white-space: pre-wrap;  /* Сохраняем переносы строк */
+            white-space: pre-wrap;
         }
         .message-own .message-bubble {
             background: #1f6390;
@@ -249,6 +249,10 @@
     const statusSpan = document.getElementById('status');
     const imageInput = document.getElementById('imageInput');
 
+    // Максимальный размер файла: 7 МБ (после base64 станет ~9.3 МБ, что укладывается в лимит сервера 10 МБ)
+    const MAX_FILE_SIZE_MB = 7;
+    const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
     function addSystemMessage(text) {
         const div = document.createElement('div');
         div.className = 'system-message';
@@ -306,25 +310,34 @@
             return;
         }
         let text = messageInput.value;
-        // Не обрезаем пробелы полностью — можно отправить только картинку без текста
         if (text.trim() === '' && !imageBase64) return;
         
         socket.emit('send_message', { text: text, image: imageBase64 });
         messageInput.value = '';
-        // Сбрасываем высоту textarea
         messageInput.style.height = 'auto';
         messageInput.focus();
     }
 
-    // Обработка выбора файла
+    // Обработка выбора файла с проверкой размера
     imageInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+            addSystemMessage(`❌ Файл слишком большой! Максимальный размер: ${MAX_FILE_SIZE_MB} МБ.`);
+            imageInput.value = '';
+            return;
+        }
+        
         const reader = new FileReader();
         reader.onload = function(ev) {
             const base64 = ev.target.result;
             sendMessageWithImage(base64);
-            imageInput.value = ''; // очищаем, чтобы можно было загрузить тот же файл снова
+            imageInput.value = '';
+        };
+        reader.onerror = function() {
+            addSystemMessage('❌ Ошибка при чтении файла');
+            imageInput.value = '';
         };
         reader.readAsDataURL(file);
     });
@@ -375,10 +388,8 @@
         socket.emit('set_nick', { nick: nick });
     }
 
-    // Отправка по кнопке
     sendBtn.addEventListener('click', () => sendMessageWithImage(null));
     
-    // Shift+Enter = перенос строки, Enter = отправка
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -386,7 +397,6 @@
         }
     });
     
-    // Автоматическое изменение высоты textarea
     messageInput.addEventListener('input', function() {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
@@ -395,7 +405,6 @@
     setNickBtn.addEventListener('click', setNick);
     nickInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') setNick(); });
 
-    // Загружаем сохранённый ник из localStorage
     const saved = localStorage.getItem('python_chat_nick');
     if (saved) {
         nickInput.value = saved;
