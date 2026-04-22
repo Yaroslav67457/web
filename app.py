@@ -2,14 +2,20 @@ from flask import Flask, request
 from flask_socketio import SocketIO, emit
 from datetime import datetime
 import os
-import base64
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
-socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Увеличиваем лимит размера входящего сообщения до 10 МБ (10 * 1024 * 1024)
+# Это позволит передавать скриншоты весом ~7-8 МБ в исходном виде (после base64 станет ~10 МБ)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    max_http_buffer_size=10 * 1024 * 1024  # 10 MB
+)
 
 users = {}
-messages = []  # храним последние 100 сообщений (текст + изображения)
+messages = []  # храним последние 100 сообщений
 
 @app.route('/')
 def index():
@@ -32,7 +38,7 @@ def handle_set_nick(data):
 @socketio.on('send_message')
 def handle_message(data):
     text = data.get('text', '').strip()
-    image = data.get('image')  # base64 строка, если есть
+    image = data.get('image')  # base64 строка, может быть None
     if not text and not image:
         return
     nick = users.get(request.sid)
@@ -42,13 +48,17 @@ def handle_message(data):
     msg = {
         'username': nick,
         'text': text,
-        'image': image,  # может быть None или base64
+        'image': image,
         'timestamp': datetime.now().strftime('%H:%M:%S')
     }
     messages.append(msg)
     if len(messages) > 100:
         messages.pop(0)
-    emit('new_message', msg, broadcast=True)
+    try:
+        emit('new_message', msg, broadcast=True)
+    except Exception as e:
+        print(f"Broadcast error: {e}")
+        emit('system', {'msg': 'Не удалось отправить сообщение (превышен размер)'})
 
 @socketio.on('disconnect')
 def handle_disconnect():
