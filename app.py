@@ -2,13 +2,14 @@ from flask import Flask, request
 from flask_socketio import SocketIO, emit
 from datetime import datetime
 import os
+import base64
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 users = {}
-messages = []
+messages = []  # храним последние 100 сообщений (текст + изображения)
 
 @app.route('/')
 def index():
@@ -31,7 +32,8 @@ def handle_set_nick(data):
 @socketio.on('send_message')
 def handle_message(data):
     text = data.get('text', '').strip()
-    if not text:
+    image = data.get('image')  # base64 строка, если есть
+    if not text and not image:
         return
     nick = users.get(request.sid)
     if not nick:
@@ -40,6 +42,7 @@ def handle_message(data):
     msg = {
         'username': nick,
         'text': text,
+        'image': image,  # может быть None или base64
         'timestamp': datetime.now().strftime('%H:%M:%S')
     }
     messages.append(msg)
