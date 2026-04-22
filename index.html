@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Чат на Python + Flask-SocketIO</title>
+    <title>Чат с картинками и переносом строк</title>
     <style>
         * {
             margin: 0;
@@ -108,6 +108,7 @@
             background: #1e2f3b;
             color: #eef2f5;
             word-wrap: break-word;
+            white-space: pre-wrap;  /* Сохраняем переносы строк */
         }
         .message-own .message-bubble {
             background: #1f6390;
@@ -127,6 +128,14 @@
         .message-name {
             font-weight: 600;
         }
+        .chat-image {
+            max-width: 250px;
+            max-height: 200px;
+            border-radius: 12px;
+            margin-top: 6px;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
         .system-message {
             text-align: center;
             font-size: 0.75rem;
@@ -144,17 +153,44 @@
             border-top: 1px solid #2f556b;
             display: flex;
             gap: 12px;
+            align-items: flex-end;
+        }
+        .input-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
         .message-input {
-            flex: 1;
+            width: 100%;
             background: #1f2f3a;
             border: none;
             padding: 14px 20px;
-            border-radius: 60px;
+            border-radius: 24px;
             color: white;
             font-size: 1rem;
             outline: none;
             border: 1px solid #3f627b;
+            resize: vertical;
+            font-family: inherit;
+            white-space: pre-wrap;
+        }
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .file-label {
+            background: #2c6e9e;
+            padding: 8px 16px;
+            border-radius: 30px;
+            color: white;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .file-label:hover {
+            background: #1f8ad0;
         }
         .send-btn {
             background: #2c7cb6;
@@ -165,6 +201,9 @@
             cursor: pointer;
             color: white;
             font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         @keyframes fadeSlide {
             from { opacity: 0; transform: translateY(12px); }
@@ -176,7 +215,7 @@
 <body>
 <div class="chat-container">
     <div class="chat-header">
-        <div class="title">💬 Чат на Python <span>Flask-SocketIO</span></div>
+        <div class="title">💬 Чат с картинками <span>Shift+Enter = перенос</span></div>
         <div class="user-panel">
             <input type="text" id="nickname" class="nick-input" placeholder="Ваш ник" maxlength="24">
             <button id="setNickBtn" class="btn-set">✅ Установить</button>
@@ -185,8 +224,16 @@
     </div>
     <div class="messages-area" id="messages"></div>
     <div class="input-panel">
-        <input type="text" id="messageInput" class="message-input" placeholder="Введите сообщение...">
-        <button id="sendBtn" class="send-btn">➤</button>
+        <div class="input-wrapper">
+            <textarea id="messageInput" class="message-input" rows="1" placeholder="Сообщение... (Shift+Enter = новая строка, Enter = отправить)"></textarea>
+            <div class="toolbar">
+                <label class="file-label">
+                    📷 Отправить скриншот
+                    <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                </label>
+                <button id="sendBtn" class="send-btn">➤</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -200,6 +247,7 @@
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
     const statusSpan = document.getElementById('status');
+    const imageInput = document.getElementById('imageInput');
 
     function addSystemMessage(text) {
         const div = document.createElement('div');
@@ -209,7 +257,7 @@
         scrollToBottom();
     }
 
-    function addMessage(username, text, timestamp, isOwn = false) {
+    function addMessage(username, text, imageBase64, timestamp, isOwn = false) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
         const meta = document.createElement('div');
@@ -217,7 +265,21 @@
         meta.innerHTML = `<span class="message-name">${escapeHtml(username)}</span><span>${timestamp}</span>`;
         const bubble = document.createElement('div');
         bubble.className = 'message-bubble';
-        bubble.textContent = text;
+        
+        if (text) {
+            const textNode = document.createElement('div');
+            textNode.style.whiteSpace = 'pre-wrap';
+            textNode.textContent = text;
+            bubble.appendChild(textNode);
+        }
+        if (imageBase64) {
+            const img = document.createElement('img');
+            img.src = imageBase64;
+            img.className = 'chat-image';
+            img.alt = 'изображение';
+            img.onclick = () => window.open(imageBase64, '_blank');
+            bubble.appendChild(img);
+        }
         msgDiv.appendChild(meta);
         msgDiv.appendChild(bubble);
         messagesDiv.appendChild(msgDiv);
@@ -237,6 +299,36 @@
         });
     }
 
+    // Отправка сообщения (текст + возможно картинка)
+    function sendMessageWithImage(imageBase64 = null) {
+        if (!currentNick) {
+            addSystemMessage('Сначала установите никнейм!');
+            return;
+        }
+        let text = messageInput.value;
+        // Не обрезаем пробелы полностью — можно отправить только картинку без текста
+        if (text.trim() === '' && !imageBase64) return;
+        
+        socket.emit('send_message', { text: text, image: imageBase64 });
+        messageInput.value = '';
+        // Сбрасываем высоту textarea
+        messageInput.style.height = 'auto';
+        messageInput.focus();
+    }
+
+    // Обработка выбора файла
+    imageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            const base64 = ev.target.result;
+            sendMessageWithImage(base64);
+            imageInput.value = ''; // очищаем, чтобы можно было загрузить тот же файл снова
+        };
+        reader.readAsDataURL(file);
+    });
+
     // --- Socket events ---
     socket.on('connect', () => {
         statusSpan.innerHTML = '🟢 Онлайн';
@@ -253,13 +345,13 @@
     });
     socket.on('new_message', (data) => {
         const isOwn = (data.username === currentNick);
-        addMessage(data.username, data.text, data.timestamp, isOwn);
+        addMessage(data.username, data.text, data.image, data.timestamp, isOwn);
     });
     socket.on('chat_history', (history) => {
         if (history && history.length) {
             history.forEach(msg => {
                 const isOwn = (msg.username === currentNick);
-                addMessage(msg.username, msg.text, msg.timestamp, isOwn);
+                addMessage(msg.username, msg.text, msg.image, msg.timestamp, isOwn);
             });
             addSystemMessage(`📜 Загружено ${history.length} сообщений`);
         }
@@ -283,21 +375,24 @@
         socket.emit('set_nick', { nick: nick });
     }
 
-    function sendMessage() {
-        if (!currentNick) {
-            addSystemMessage('Сначала установите никнейм!');
-            return;
+    // Отправка по кнопке
+    sendBtn.addEventListener('click', () => sendMessageWithImage(null));
+    
+    // Shift+Enter = перенос строки, Enter = отправка
+    messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessageWithImage(null);
         }
-        const text = messageInput.value.trim();
-        if (!text) return;
-        socket.emit('send_message', { text: text });
-        messageInput.value = '';
-        messageInput.focus();
-    }
-
+    });
+    
+    // Автоматическое изменение высоты textarea
+    messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+    
     setNickBtn.addEventListener('click', setNick);
-    sendBtn.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
     nickInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') setNick(); });
 
     // Загружаем сохранённый ник из localStorage
@@ -306,7 +401,6 @@
         nickInput.value = saved;
         setTimeout(() => setNick(), 500);
     }
-    // Сохраняем ник после успеха
     socket.on('nick_success', (data) => {
         localStorage.setItem('python_chat_nick', data.nick);
     });
