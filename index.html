@@ -205,6 +205,17 @@
             align-items: center;
             justify-content: center;
         }
+
+        /* Стили для ссылок в сообщениях */
+        .chat-link {
+            color: #6ab0ff;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        .chat-link:hover {
+            color: #9acaff;
+        }
+
         @keyframes fadeSlide {
             from { opacity: 0; transform: translateY(12px); }
             to { opacity: 1; transform: translateY(0); }
@@ -253,6 +264,35 @@
     const MAX_FILE_SIZE_MB = 7;
     const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+    // --- Функции для рендеринга ссылок ---
+    function escapeHtml(str) {
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function escapeAttr(str) {
+        return str.replace(/"/g, '&quot;');
+    }
+
+    function renderLinks(text) {
+        // Сначала экранируем весь текст
+        let escaped = escapeHtml(text);
+        // Ищем либо (имя)[url], либо обычный URL (http:// или https://)
+        const linkRegex = /(\(([^)]*)\)\[([^\]]*)\])|(https?:\/\/[^\s]+)/g;
+        return escaped.replace(linkRegex, function(match, complex, name, url, simpleUrl) {
+            if (complex) {
+                // Сложный паттерн (имя)[url]
+                let linkText = name.trim() || url; // если имя пустое, используем сам URL
+                let href = escapeAttr(url);
+                return `<a href="${href}" target="_blank" class="chat-link">${linkText}</a>`;
+            } else if (simpleUrl) {
+                // Обычная ссылка
+                let href = escapeAttr(simpleUrl);
+                return `<a href="${href}" target="_blank" class="chat-link">${simpleUrl}</a>`;
+            }
+            return match; // fallback
+        });
+    }
+
     function addSystemMessage(text) {
         const div = document.createElement('div');
         div.className = 'system-message';
@@ -271,10 +311,11 @@
         bubble.className = 'message-bubble';
         
         if (text) {
-            const textNode = document.createElement('div');
-            textNode.style.whiteSpace = 'pre-wrap';
-            textNode.textContent = text;
-            bubble.appendChild(textNode);
+            const textDiv = document.createElement('div');
+            textDiv.style.whiteSpace = 'pre-wrap';
+            // Используем innerHTML с обработанными ссылками
+            textDiv.innerHTML = renderLinks(text);
+            bubble.appendChild(textDiv);
         }
         if (imageBase64) {
             const img = document.createElement('img');
@@ -292,15 +333,6 @@
 
     function scrollToBottom() {
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    }
-
-    function escapeHtml(str) {
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
     }
 
     // Отправка сообщения (текст + возможно картинка)
