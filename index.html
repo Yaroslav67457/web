@@ -75,6 +75,10 @@
             color: white;
             font-weight: 600;
             cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-set:hover {
+            background: #1f8ad0;
         }
         .status-badge {
             font-size: 0.8rem;
@@ -82,6 +86,27 @@
             padding: 5px 12px;
             border-radius: 30px;
             color: #aad4f5;
+        }
+        .notif-toggle {
+            background: #3a6b8c;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 40px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .notif-toggle:hover {
+            background: #4f8db3;
+        }
+        .notif-toggle.off {
+            background: #5a4a4a;
+            opacity: 0.7;
         }
         .messages-area {
             flex: 1;
@@ -205,7 +230,6 @@
             align-items: center;
             justify-content: center;
         }
-
         .chat-link {
             color: #A2E4FA;
             text-decoration: underline;
@@ -230,6 +254,7 @@
             <input type="text" id="nickname" class="nick-input" placeholder="Ваш ник" maxlength="24">
             <button id="setNickBtn" class="btn-set">✅ Установить</button>
             <div class="status-badge" id="status">🔄 Соединение...</div>
+            <button id="notifToggle" class="notif-toggle">🔔 Вкл</button>
         </div>
     </div>
     <div class="messages-area" id="messages"></div>
@@ -258,24 +283,46 @@
     const sendBtn = document.getElementById('sendBtn');
     const statusSpan = document.getElementById('status');
     const imageInput = document.getElementById('imageInput');
+    const notifToggle = document.getElementById('notifToggle');
 
     const MAX_FILE_SIZE_MB = 7;
     const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
     // ---------- УВЕДОМЛЕНИЯ ----------
+    // Состояние уведомлений (по умолчанию true, если не сохранено)
+    let notificationsEnabled = localStorage.getItem('chat_notifications_enabled') !== 'false';
+
+    function updateNotifButton() {
+        if (notificationsEnabled) {
+            notifToggle.textContent = '🔔 Вкл';
+            notifToggle.classList.remove('off');
+        } else {
+            notifToggle.textContent = '🔕 Выкл';
+            notifToggle.classList.add('off');
+        }
+    }
+    updateNotifButton();
+
+    notifToggle.addEventListener('click', function() {
+        notificationsEnabled = !notificationsEnabled;
+        localStorage.setItem('chat_notifications_enabled', notificationsEnabled);
+        updateNotifButton();
+        addSystemMessage(notificationsEnabled ? '🔔 Уведомления включены' : '🔕 Уведомления выключены');
+    });
+
     // Запрос разрешения при загрузке
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
     }
 
     function showNotification(title, body) {
+        if (!notificationsEnabled) return;
         if (!('Notification' in window)) return;
         if (Notification.permission === 'granted') {
-            // Если страница не в фокусе — показываем уведомление
             if (document.hidden) {
                 new Notification(title, {
                     body: body,
-                    icon: 'https://cdn-icons-png.flaticon.com/512/4712/4712031.png' // опционально
+                    icon: 'https://cdn-icons-png.flaticon.com/512/4712/4712031.png'
                 });
             }
         }
@@ -402,10 +449,9 @@
         const isOwn = (data.username === currentNick);
         addMessage(data.username, data.text, data.image, data.timestamp, isOwn);
 
-        // ---------- ПОКАЗ УВЕДОМЛЕНИЯ (если сообщение не от себя и страница не активна) ----------
+        // Показ уведомления (если не от себя и включено)
         if (!isOwn) {
             let body = data.text ? data.text : (data.image ? '📷 Изображение' : '');
-            // Обрезаем длинные сообщения для уведомления
             if (body.length > 200) body = body.slice(0, 200) + '…';
             showNotification(data.username, body);
         }
