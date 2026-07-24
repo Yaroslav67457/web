@@ -206,7 +206,6 @@
             justify-content: center;
         }
 
-        /* Стили для ссылок в сообщениях */
         .chat-link {
             color: #A2E4FA;
             text-decoration: underline;
@@ -260,11 +259,29 @@
     const statusSpan = document.getElementById('status');
     const imageInput = document.getElementById('imageInput');
 
-    // Максимальный размер файла: 7 МБ (после base64 станет ~9.3 МБ, что укладывается в лимит сервера 10 МБ)
     const MAX_FILE_SIZE_MB = 7;
     const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
-    // --- Функции для рендеринга ссылок ---
+    // ---------- УВЕДОМЛЕНИЯ ----------
+    // Запрос разрешения при загрузке
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+
+    function showNotification(title, body) {
+        if (!('Notification' in window)) return;
+        if (Notification.permission === 'granted') {
+            // Если страница не в фокусе — показываем уведомление
+            if (document.hidden) {
+                new Notification(title, {
+                    body: body,
+                    icon: 'https://cdn-icons-png.flaticon.com/512/4712/4712031.png' // опционально
+                });
+            }
+        }
+    }
+    // ---------------------------------
+
     function escapeHtml(str) {
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
@@ -274,22 +291,18 @@
     }
 
     function renderLinks(text) {
-        // Сначала экранируем весь текст
         let escaped = escapeHtml(text);
-        // Ищем либо (имя)[url], либо обычный URL (http:// или https://)
         const linkRegex = /(\(([^)]*)\)\[([^\]]*)\])|(https?:\/\/[^\s]+)/g;
         return escaped.replace(linkRegex, function(match, complex, name, url, simpleUrl) {
             if (complex) {
-                // Сложный паттерн (имя)[url]
-                let linkText = name.trim() || url; // если имя пустое, используем сам URL
+                let linkText = name.trim() || url;
                 let href = escapeAttr(url);
                 return `<a href="${href}" target="_blank" class="chat-link">${linkText}</a>`;
             } else if (simpleUrl) {
-                // Обычная ссылка
                 let href = escapeAttr(simpleUrl);
                 return `<a href="${href}" target="_blank" class="chat-link">${simpleUrl}</a>`;
             }
-            return match; // fallback
+            return match;
         });
     }
 
@@ -313,7 +326,6 @@
         if (text) {
             const textDiv = document.createElement('div');
             textDiv.style.whiteSpace = 'pre-wrap';
-            // Используем innerHTML с обработанными ссылками
             textDiv.innerHTML = renderLinks(text);
             bubble.appendChild(textDiv);
         }
@@ -335,7 +347,6 @@
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
-    // Отправка сообщения (текст + возможно картинка)
     function sendMessageWithImage(imageBase64 = null) {
         if (!currentNick) {
             addSystemMessage('Сначала установите никнейм!');
@@ -350,7 +361,6 @@
         messageInput.focus();
     }
 
-    // Обработка выбора файла с проверкой размера
     imageInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -391,6 +401,14 @@
     socket.on('new_message', (data) => {
         const isOwn = (data.username === currentNick);
         addMessage(data.username, data.text, data.image, data.timestamp, isOwn);
+
+        // ---------- ПОКАЗ УВЕДОМЛЕНИЯ (если сообщение не от себя и страница не активна) ----------
+        if (!isOwn) {
+            let body = data.text ? data.text : (data.image ? '📷 Изображение' : '');
+            // Обрезаем длинные сообщения для уведомления
+            if (body.length > 200) body = body.slice(0, 200) + '…';
+            showNotification(data.username, body);
+        }
     });
     socket.on('chat_history', (history) => {
         if (history && history.length) {
