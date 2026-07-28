@@ -4,6 +4,12 @@ from collections import deque
 from datetime import datetime
 import socketio
 import os
+import base64
+import asyncio
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret!"
@@ -80,9 +86,19 @@ async def handle_message(sid, data):
     if not isinstance(text, str) or not isinstance(image, (str, type(None))):
         return
     text = text.strip()
-    if len(text) > MAX_TEXT_LENGTH or len(image or "") > MAX_IMAGE_LENGTH:
+    if len(text) > MAX_TEXT_LENGTH:
         await sio.emit("system", {"msg": "Сообщение или изображение слишком большое"}, to=sid)
         return
+    if image:
+        try:
+            decoded_image = base64.b64decode(image, validate=True)
+        except Exception as e:
+            logger.error(f"Malformed base64 image: {e}")
+            await sio.emit("system", {"msg": "Некорректное изображение"}, to=sid)
+            return
+        if len(decoded_image) > MAX_IMAGE_LENGTH:
+            await sio.emit("system", {"msg": "Сообщение или изображение слишком большое"}, to=sid)
+            return
     if not text and not image:
         return
     nick = users.get(sid)
@@ -96,11 +112,14 @@ async def handle_message(sid, data):
         "timestamp": datetime.now().strftime("%H:%M:%S"),
     }
     messages.append(msg)
-    print(f"[CHAT] {msg['timestamp']} | {msg['username']}: {msg['text'][:50]}{' [image]' if image else ''}")
+    logger.info(f"[CHAT] {msg['timestamp']} | {msg['username']}: {msg['text'][:50]}{' [image]' if image else ''}")
     try:
-        await sio.emit("new_message", msg)
+        await asyncio.wait_for(sio.emit("new_message", msg), timeout=5)
+    except asyncio.TimeoutError:
+        logger.error("Broadcast error: timed out after 5 seconds")
+        await sio.emit("system", {"msg": "Не удалось отправить сообщение (превышен размер)"}, to=sid)
     except Exception as e:
-        print(f"Broadcast error: {e}")
+        logger.error(f"Broadcast error: {e}")
         await sio.emit("system", {"msg": "Не удалось отправить сообщение (превышен размер)"}, to=sid)
 
 
