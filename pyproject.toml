@@ -1,0 +1,12 @@
+[project]
+name = "slishkom-ahuenniy-chat-chtoby-eto-voobrazit"
+version = "0.1.0"
+description = ""
+authors = ["dolbaeb <dolbaeb@dolbaeb.dolbaeb>"]
+requires-python = ">=3.11"
+dependencies = [
+    "asgiref>=3.12.1",
+    "flask>=3.1.2",
+    "python-socketio>=5.16.3",
+    "uvicorn>=0.51.0",
+]
