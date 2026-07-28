@@ -332,6 +332,34 @@
             color: #9acaff;
         }
 
+        .reply-btn {
+            background: transparent;
+            border: none;
+            color: #7fa5c0;
+            cursor: pointer;
+            font-size: 0.7rem;
+            padding: 0 6px;
+            border-radius: 6px;
+            transition: 0.15s;
+        }
+        .reply-btn:hover {
+            color: #c3e2ff;
+            background: rgba(255,255,255,0.08);
+        }
+        .reply-quote {
+            padding: 4px 10px;
+            margin-bottom: 6px;
+            border-left: 3px solid #4a8eb0;
+            background: rgba(255,255,255,0.06);
+            border-radius: 6px;
+            font-size: 0.78rem;
+            color: #b0d0e5;
+        }
+        .reply-quote-name {
+            font-weight: 600;
+            color: #8ecaf0;
+        }
+
         @keyframes fadeSlide {
             from { opacity: 0; transform: translateY(12px); }
             to { opacity: 1; transform: translateY(0); }
@@ -380,6 +408,7 @@
 <script>
     const socket = io({ transports: ['websocket', 'polling'] });
     let currentNick = '';
+    let replyTo = null;
 
     const messagesDiv = document.getElementById('messages');
     const nickInput = document.getElementById('nickname');
@@ -541,7 +570,7 @@
         scrollToBottom();
     }
 
-    function addMessage(username, text, imageBase64, timestamp, isOwn = false) {
+    function addMessage(username, text, imageBase64, timestamp, isOwn = false, replyData = null) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
         const meta = document.createElement('div');
@@ -549,6 +578,16 @@
         meta.innerHTML = `<span class="message-name">${escapeHtml(username)}</span><span>${timestamp}</span>`;
         const bubble = document.createElement('div');
         bubble.className = 'message-bubble';
+
+        if (replyData && replyData.username) {
+            const quote = document.createElement('div');
+            quote.className = 'reply-quote';
+            const replyText = replyData.text
+                ? (replyData.text.length > 80 ? replyData.text.slice(0, 80) + '…' : replyData.text)
+                : (replyData.image ? '📷 Изображение' : '');
+            quote.innerHTML = `<span class="reply-quote-name">${escapeHtml(replyData.username)}</span>: ${escapeHtml(replyText)}`;
+            bubble.appendChild(quote);
+        }
 
         if (text) {
             const textDiv = document.createElement('div');
@@ -566,6 +605,20 @@
         }
         msgDiv.appendChild(meta);
         msgDiv.appendChild(bubble);
+
+        if (!isOwn) {
+            const replyBtn = document.createElement('button');
+            replyBtn.className = 'reply-btn';
+            replyBtn.textContent = '↩ Ответить';
+            replyBtn.addEventListener('click', () => {
+                replyTo = { username, text: text || (imageBase64 ? '📷 Изображение' : ''), timestamp };
+                const snippet = replyTo.text.length > 50 ? replyTo.text.slice(0, 50) + '…' : replyTo.text;
+                messageInput.placeholder = `Ответить: @${username} - ${snippet}`;
+                messageInput.focus();
+            });
+            meta.appendChild(replyBtn);
+        }
+
         messagesDiv.appendChild(msgDiv);
         scrollToBottom();
     }
@@ -582,10 +635,20 @@
         let text = messageInput.value;
         if (text.trim() === '' && !imageBase64) return;
 
-        socket.emit('send_message', { text: text, image: imageBase64 });
+        const payload = { text: text, image: imageBase64 };
+        if (replyTo) {
+            payload.reply_to = replyTo;
+        }
+        socket.emit('send_message', payload);
         messageInput.value = '';
         messageInput.style.height = 'auto';
+        cancelReply();
         messageInput.focus();
+    }
+
+    function cancelReply() {
+        replyTo = null;
+        messageInput.placeholder = 'Сообщение...';
     }
 
     imageInput.addEventListener('change', (e) => {
@@ -627,7 +690,7 @@
     });
     socket.on('new_message', (data) => {
         const isOwn = (data.username === currentNick);
-        addMessage(data.username, data.text, data.image, data.timestamp, isOwn);
+        addMessage(data.username, data.text, data.image, data.timestamp, isOwn, data.reply_to || null);
 
         // Показ уведомления (если не от себя и включено)
         if (!isOwn) {
@@ -640,7 +703,7 @@
         if (history && history.length) {
             history.forEach(msg => {
                 const isOwn = (msg.username === currentNick);
-                addMessage(msg.username, msg.text, msg.image, msg.timestamp, isOwn);
+                addMessage(msg.username, msg.text, msg.image, msg.timestamp, isOwn, msg.reply_to || null);
             });
             addSystemMessage(`📜 Загружено ${history.length} сообщений`);
         }
