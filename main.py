@@ -77,7 +77,10 @@ async def handle_message(sid, data):
         return
     text = data.get("text", "")
     image = data.get("image")  # base64 строка, может быть None
+    reply_to = data.get("reply_to")  # {username, text, timestamp} или None
     if not isinstance(text, str) or not isinstance(image, (str, type(None))):
+        return
+    if reply_to is not None and not isinstance(reply_to, dict):
         return
     text = text.strip()
     if len(text) > MAX_TEXT_LENGTH or len(image or "") > MAX_IMAGE_LENGTH:
@@ -93,6 +96,7 @@ async def handle_message(sid, data):
         "username": nick,
         "text": text,
         "image": image,
+        "reply_to": reply_to,
         "timestamp": datetime.now().strftime("%H:%M:%S"),
     }
     messages.append(msg)
