@@ -18,6 +18,7 @@ asgi_app = socketio.ASGIApp(sio, other_asgi_app=WsgiToAsgi(app))
 
 users = {}
 messages = deque(maxlen=100)  # храним последние 100 сообщений
+message_id_counter = 0
 MAX_NICK_LENGTH = 24
 MAX_TEXT_LENGTH = 4000
 MAX_IMAGE_LENGTH = 10 * 1024 * 1024
@@ -55,6 +56,11 @@ async def handle_set_nick(sid, data):
         await sio.emit("nick_failed", {"reason": "Ник не может быть пустым"}, to=sid)
         return
     old_nick = users.get(sid)
+    # Проверка: ник уже занят другим пользователем?
+    for other_sid, existing_nick in users.items():
+        if other_sid != sid and existing_nick.lower() == nick.lower():
+            await sio.emit("nick_failed", {"reason": f"Ник «{nick}» уже занят"}, to=sid)
+            return
     users[sid] = nick
     await sio.emit("nick_success", {"nick": nick}, to=sid)
     if old_nick is None:
@@ -92,11 +98,15 @@ async def handle_message(sid, data):
     if not nick:
         await sio.emit("system", {"msg": "Сначала установи никнейм"}, to=sid)
         return
+    global message_id_counter
+    message_id_counter += 1
     msg = {
+        "id": message_id_counter,
         "username": nick,
         "text": text,
         "image": image,
         "reply_to": reply_to,
+        "edited": False,
         "timestamp": datetime.now().strftime("%H:%M:%S"),
     }
     messages.append(msg)
@@ -106,6 +116,78 @@ async def handle_message(sid, data):
     except Exception as e:
         print(f"Broadcast error: {e}")
         await sio.emit("system", {"msg": "Не удалось отправить сообщение (превышен размер)"}, to=sid)
+
+
+@sio.on("edit_message")
+async def handle_edit_message(sid, data):
+    if not isinstance(data, dict):
+        return
+    msg_id = data.get("id")
+    new_text = data.get("text", "")
+    if not isinstance(msg_id, int) or not isinstance(new_text, str):
+        return
+    new_text = new_text.strip()
+    if not new_text or len(new_text) > MAX_TEXT_LENGTH:
+        await sio.emit("system", {"msg": "Текст сообщения не может быть пустым"}, to=sid)
+        return
+    nick = users.get(sid)
+    if not nick:
+        return
+    for msg in messages:
+        if msg.get("id") == msg_id:
+            if msg.get("username") != nick:
+                await sio.emit("system", {"msg": "Нельзя редактировать чужие сообщения"}, to=sid)
+                return
+            old_text = msg["text"]
+            msg["text"] = new_text
+            msg["edited"] = True
+            msg["timestamp"] = datetime.now().strftime("%H:%M:%S")
+            print(f"[EDIT] {msg['username']}: «{old_text[:50]}» → «{new_text[:50]}»")
+            await sio.emit("message_edited", {"id": msg_id, "text": new_text, "timestamp": msg["timestamp"]})
+            return
+    await sio.emit("system", {"msg": "Сообщение не найдено"}, to=sid)
+
+
+@sio.on("whisper_message")
+async def handle_whisper(sid, data):
+    if not isinstance(data, dict):
+        return
+    target_nick = data.get("target_nick", "")
+    text = data.get("text", "")
+    image = data.get("image")
+    reply_to = data.get("reply_to")
+    if not isinstance(target_nick, str) or not isinstance(text, str) or not isinstance(image, (str, type(None))):
+        return
+    if reply_to is not None and not isinstance(reply_to, dict):
+        return
+    text = text.strip()
+    if not text and not image:
+        return
+    if len(text) > MAX_TEXT_LENGTH or len(image or "") > MAX_IMAGE_LENGTH:
+        await sio.emit("system", {"msg": "Сообщение слишком большое"}, to=sid)
+        return
+    nick = users.get(sid)
+    if not nick:
+        return
+    target_sid = None
+    for other_sid, other_nick in users.items():
+        if other_nick.lower() == target_nick.lower():
+            target_sid = other_sid
+            break
+    if not target_sid or target_sid == sid:
+        await sio.emit("system", {"msg": f"Пользователь «{target_nick}» не найден"}, to=sid)
+        return
+    msg = {
+        "from": nick,
+        "to": target_nick,
+        "text": text,
+        "image": image,
+        "reply_to": reply_to,
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+    }
+    print(f"[WHISPER] {msg['from']} → {msg['to']}: {msg['text'][:50]}{' [image]' if image else ''}")
+    await sio.emit("new_whisper", msg, to=sid)
+    await sio.emit("new_whisper", msg, to=target_sid)
 
 
 @sio.event
