@@ -359,6 +359,61 @@
             font-weight: 600;
             color: #8ecaf0;
         }
+        .edit-btn {
+            background: transparent;
+            border: none;
+            color: #7fa5c0;
+            cursor: pointer;
+            font-size: 0.7rem;
+            padding: 0 6px;
+            border-radius: 6px;
+            transition: 0.15s;
+        }
+        .edit-btn:hover {
+            color: #f0d080;
+            background: rgba(255,255,255,0.08);
+        }
+        .whisper-btn {
+            background: transparent;
+            border: 1px solid #3f627b;
+            width: 48px;
+            height: 48px;
+            border-radius: 60px;
+            cursor: pointer;
+            font-size: 1.2rem;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .whisper-msg .message-name::after {
+            content: ' 🤫';
+            font-size: 0.85em;
+        }
+        .whisper-msg .message-bubble {
+            border-left: 3px solid #4a8eb0;
+        }
+            color: #f0d080;
+            background: rgba(255,255,255,0.08);
+        }
+        .edit-textarea {
+            width: 100%;
+            background: #1a2e3c;
+            border: 1px solid #4a8eb0;
+            border-radius: 10px;
+            padding: 8px 12px;
+            color: white;
+            font-size: 0.9rem;
+            font-family: inherit;
+            resize: vertical;
+            outline: none;
+            min-height: 60px;
+        }
+        .edited-badge {
+            font-size: 0.65rem;
+            color: #7a9ab0;
+            margin-left: 6px;
+        }
 
         @keyframes fadeSlide {
             from { opacity: 0; transform: translateY(12px); }
@@ -409,6 +464,8 @@
     const socket = io({ transports: ['websocket', 'polling'] });
     let currentNick = '';
     let replyTo = null;
+    let whisperTo = null;
+    const messageElements = new Map(); // msgId -> { div, textDiv, bubble }
 
     const messagesDiv = document.getElementById('messages');
     const nickInput = document.getElementById('nickname');
@@ -423,6 +480,8 @@
     const notifAddBtn = document.getElementById('notifAddBtn');
     const notifUsers = document.getElementById('notifUsers');
     const notifAllToggle = document.getElementById('notifAllToggle');
+
+    const SCROLL_THRESHOLD = 80;
 
     const MAX_FILE_SIZE_MB = 7;
     const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -570,9 +629,11 @@
         scrollToBottom();
     }
 
-    function addMessage(username, text, imageBase64, timestamp, isOwn = false, replyData = null) {
+    function addMessage(username, text, imageBase64, timestamp, isOwn = false, replyData = null, msgId = null, whisper = false) {
         const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
+        const cls = isOwn ? 'message-own' : 'message-other';
+        msgDiv.className = `message ${cls}${whisper ? ' whisper-msg' : ''}`;
+        if (msgId) msgDiv.dataset.msgId = msgId;
         const meta = document.createElement('div');
         meta.className = 'message-meta';
         meta.innerHTML = `<span class="message-name">${escapeHtml(username)}</span><span>${timestamp}</span>`;
@@ -591,6 +652,7 @@
 
         if (text) {
             const textDiv = document.createElement('div');
+            textDiv.className = 'msg-text';
             textDiv.style.whiteSpace = 'pre-wrap';
             textDiv.innerHTML = renderLinks(text);
             bubble.appendChild(textDiv);
@@ -606,6 +668,7 @@
         msgDiv.appendChild(meta);
         msgDiv.appendChild(bubble);
 
+        // Кнопки в meta
         if (!isOwn) {
             const replyBtn = document.createElement('button');
             replyBtn.className = 'reply-btn';
@@ -617,14 +680,120 @@
                 messageInput.focus();
             });
             meta.appendChild(replyBtn);
+
+            const whisperBtn = document.createElement('button');
+            whisperBtn.className = 'reply-btn';
+            whisperBtn.textContent = '🤫';
+            whisperBtn.title = `Шёпот для ${username}`;
+            whisperBtn.addEventListener('click', () => {
+                whisperTo = { username };
+                messageInput.placeholder = `🤫 @${username}: сообщение...`;
+                messageInput.focus();
+            });
+            meta.appendChild(whisperBtn);
+        }
+        if (isOwn && msgId) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'edit-btn';
+            editBtn.textContent = '✏️';
+            editBtn.title = 'Редактировать';
+            editBtn.addEventListener('click', () => startEditing(msgId, text || ''));
+            meta.appendChild(editBtn);
+        }
+
+        if (msgId) {
+            messageElements.set(msgId, { div: msgDiv, textDiv: bubble.querySelector('.msg-text'), bubble });
         }
 
         messagesDiv.appendChild(msgDiv);
         scrollToBottom();
     }
 
+    function startEditing(msgId, currentText) {
+        const entry = messageElements.get(msgId);
+        if (!entry || !entry.textDiv) return;
+        const { textDiv, bubble } = entry;
+
+        // Прячем старый текст, показываем textarea
+        textDiv.style.display = 'none';
+        const ta = document.createElement('textarea');
+        ta.className = 'edit-textarea';
+        ta.value = currentText;
+        bubble.appendChild(ta);
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+
+        function saveEdit() {
+            const newText = ta.value.trim();
+            if (!newText || newText === currentText) {
+                cancelEdit();
+                return;
+            }
+            socket.emit('edit_message', { id: msgId, text: newText });
+            ta.disabled = true;
+            ta.style.opacity = '0.5';
+        }
+
+        function cancelEdit() {
+            ta.remove();
+            textDiv.style.display = '';
+        }
+
+        ta.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                saveEdit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+            }
+        });
+        ta.addEventListener('blur', cancelEdit);
+    }
+
+    function updateEditedMessage(msgId, newText, newTimestamp) {
+        const entry = messageElements.get(msgId);
+        if (!entry) return;
+        const { textDiv, bubble } = entry;
+
+        // Убираем textarea редактирования если есть
+        const existingTa = bubble.querySelector('.edit-textarea');
+        if (existingTa) existingTa.remove();
+
+        if (textDiv) {
+            textDiv.style.display = '';
+            textDiv.innerHTML = renderLinks(newText);
+        }
+
+        // Добавляем/обновляем бейдж edited
+        const meta = entry.div.querySelector('.message-meta');
+        if (meta) {
+            let badge = meta.querySelector('.edited-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'edited-badge';
+                badge.textContent = 'ред.';
+                meta.appendChild(badge);
+            }
+            // Обновляем время
+            const timeSpan = meta.querySelector('span:last-child');
+            // Находим именно span с временем (не бейдж, не имя)
+            const spans = meta.querySelectorAll('span');
+            for (const s of spans) {
+                if (s.classList.contains('message-name')) continue;
+                if (s.classList.contains('edited-badge')) continue;
+                if (newTimestamp) s.textContent = newTimestamp;
+                break;
+            }
+        }
+    }
+
     function scrollToBottom() {
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        // Скроллим только если пользователь уже был внизу (или рядом)
+        const atBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < SCROLL_THRESHOLD;
+        if (atBottom) {
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
     }
 
     function sendMessageWithImage(imageBase64 = null) {
@@ -639,14 +808,22 @@
         if (replyTo) {
             payload.reply_to = replyTo;
         }
-        socket.emit('send_message', payload);
+
+        if (whisperTo) {
+            payload.target_nick = whisperTo.username;
+            socket.emit('whisper_message', payload);
+        } else {
+            socket.emit('send_message', payload);
+        }
+
         messageInput.value = '';
         messageInput.style.height = 'auto';
-        cancelReply();
+        cancelWhisper();
         messageInput.focus();
     }
 
-    function cancelReply() {
+    function cancelWhisper() {
+        whisperTo = null;
         replyTo = null;
         messageInput.placeholder = 'Сообщение...';
     }
@@ -690,7 +867,7 @@
     });
     socket.on('new_message', (data) => {
         const isOwn = (data.username === currentNick);
-        addMessage(data.username, data.text, data.image, data.timestamp, isOwn, data.reply_to || null);
+        addMessage(data.username, data.text, data.image, data.timestamp, isOwn, data.reply_to || null, data.id || null);
 
         // Показ уведомления (если не от себя и включено)
         if (!isOwn) {
@@ -703,9 +880,22 @@
         if (history && history.length) {
             history.forEach(msg => {
                 const isOwn = (msg.username === currentNick);
-                addMessage(msg.username, msg.text, msg.image, msg.timestamp, isOwn, msg.reply_to || null);
+                addMessage(msg.username, msg.text, msg.image, msg.timestamp, isOwn, msg.reply_to || null, msg.id || null);
             });
             addSystemMessage(`📜 Загружено ${history.length} сообщений`);
+        }
+    });
+    socket.on('message_edited', (data) => {
+        updateEditedMessage(data.id, data.text, data.timestamp || null);
+    });
+    socket.on('new_whisper', (data) => {
+        const isFromMe = (data.from === currentNick);
+        const displayName = isFromMe ? `→ ${data.to}` : data.from;
+        const isOwn = isFromMe;
+        addMessage(displayName, data.text, data.image, data.timestamp, isOwn, data.reply_to || null, null, true);
+        if (!isFromMe) {
+            const body = data.text ? data.text : (data.image ? '📷 Изображение' : '');
+            showNotification(`🤫 ${data.from}`, body);
         }
     });
     socket.on('nick_success', (data) => {
@@ -733,6 +923,14 @@
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendMessageWithImage(null);
+        } else if (e.key === 'Escape') {
+            if (whisperTo) {
+                e.preventDefault();
+                cancelWhisper();
+            } else if (replyTo) {
+                e.preventDefault();
+                cancelWhisper();
+            }
         }
     });
 
