@@ -630,6 +630,7 @@
     }
 
     function addMessage(username, text, imageBase64, timestamp, isOwn = false, replyData = null, msgId = null, whisper = false) {
+        const wasAtBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < SCROLL_THRESHOLD;
         const msgDiv = document.createElement('div');
         const cls = isOwn ? 'message-own' : 'message-other';
         msgDiv.className = `message ${cls}${whisper ? ' whisper-msg' : ''}`;
@@ -706,7 +707,9 @@
         }
 
         messagesDiv.appendChild(msgDiv);
-        scrollToBottom();
+        if (wasAtBottom) {
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
     }
 
     function startEditing(msgId, currentText) {
